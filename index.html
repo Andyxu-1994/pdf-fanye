@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Viewer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            /* background-color: #f4f4f9; */
+            background: url('backGroundImgURL.jpg') repeat; 
+        }
+        .container {
+            width: 80%;
+            max-width: 1200px;
+            text-align: center;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+            transition: background-color 0.3s ease;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        .canvas-container {
+            display: flex;
+            justify-content: center;
+            gap: 3px;
+        }
+        canvas {
+            border: 1px solid #ddd;
+            margin-bottom: 20px;
+            box-shadow: 
+                0 2px 4px rgba(0, 0, 0, 0.15),   /* 基础环境阴影 */
+                0 4px 8px rgba(0, 0, 0, 0.2),    /* 主投影层 */
+                0 6px 12px rgba(0, 0, 0, 0.25),   /* 深度增强层 */
+                0 8px 16px rgba(0, 0, 0, 0.1);    /* 扩散模糊层 */
+        }
+
+
+        .Btn {
+            padding: 10px 20px;
+            font-size: 27px;
+            margin: 66px;
+
+        }
+        .pagenumber {
+            font-size: 23px;
+            background-color: blue;
+            /* margin: 5px; */
+            padding: 10px;
+            color:white;
+        }
+
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <button id="prevPageBtn" disabled class="Btn">向前翻</button>
+            <span id="pageInfo" class="pagenumber"></span>
+            <button id="nextPageBtn"  class="Btn">向后翻</button>
+        </div>
+        <div class="canvas-container" id="canvasContainer"></div>
+    </div>
+
+    <!-- PDF.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <script>
+        // Ensure pdfjsLib is defined and set up the workerSrc
+        if (typeof pdfjsLib === 'undefined') {
+            console.error('PDF.js is not loaded.');
+        } else {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
+        }
+
+        let pdfDoc = null,
+            pageNum = 1,
+            pageRendering = false,
+            pageNumPending = null,
+            scale = 1.5,
+            totalPages = 0;
+
+        function renderPage(num) {
+            pageRendering = true;
+            const container = document.getElementById('canvasContainer');
+            container.innerHTML = ''; // Clear previous pages
+
+            if (num === 1 || num === totalPages) {
+                // Single page view for the first and last page
+                pdfDoc.getPage(num).then(page => {
+                    const viewport = page.getViewport({ scale });
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+
+                    const renderContext = {
+                        canvasContext: context,
+                        viewport: viewport
+                    };
+                    page.render(renderContext).promise.then(() => {
+                        pageRendering = false;
+                        if (pageNumPending !== null) {
+                            renderPage(pageNumPending);
+                            pageNumPending = null;
+                        }
+                    });
+
+                    container.appendChild(canvas);
+                });
+            } else if (num + 1 <= totalPages) {
+                // Two-page view for other pages
+                const leftPageNum = num;
+                const rightPageNum = num + 1;
+
+                Promise.all([pdfDoc.getPage(leftPageNum), pdfDoc.getPage(rightPageNum)]).then(pages => {
+                    const [leftPage, rightPage] = pages;
+                    const leftViewport = leftPage.getViewport({ scale });
+                    const rightViewport = rightPage.getViewport({ scale });
+
+                    const leftCanvas = document.createElement('canvas');
+                    const rightCanvas = document.createElement('canvas');
+                    const leftContext = leftCanvas.getContext('2d');
+                    const rightContext = rightCanvas.getContext('2d');
+
+                    leftCanvas.height = leftViewport.height;
+                    leftCanvas.width = leftViewport.width;
+                    rightCanvas.height = rightViewport.height;
+                    rightCanvas.width = rightViewport.width;
+
+                    const leftRenderContext = {
+                        canvasContext: leftContext,
+                        viewport: leftViewport
+                    };
+                    const rightRenderContext = {
+                        canvasContext: rightContext,
+                        viewport: rightViewport
+                    };
+
+                    leftPage.render(leftRenderContext).promise.then(() => {
+                        rightPage.render(rightRenderContext).promise.then(() => {
+                            pageRendering = false;
+                            if (pageNumPending !== null) {
+                                renderPage(pageNumPending);
+                                pageNumPending = null;
+                            }
+                        });
+                    });
+
+                    container.appendChild(leftCanvas);
+                    container.appendChild(rightCanvas);
+                });
+            }
+
+            // Update page info
+            if (num === totalPages) {
+                document.getElementById('pageInfo').textContent = `${totalPages} / 全书+${totalPages}页`;
+            } else if (num + 1 <= totalPages) {
+                document.getElementById('pageInfo').textContent = `${num}-${num + 1} / 全书${totalPages}页`;
+            } else {
+                document.getElementById('pageInfo').textContent = `${num} / 全书${totalPages}`;
+            }
+
+            // Update button states
+            document.getElementById('prevPageBtn').disabled = num <= 1;
+            if (num === totalPages) {
+                document.getElementById('nextPageBtn').disabled = true;
+            } else if (num + 1 === totalPages) {
+                document.getElementById('nextPageBtn').disabled = true;
+            } else {
+                document.getElementById('nextPageBtn').disabled = false;
+            }
+        }
+
+        function queueRenderPage(num) {
+            if (pageRendering) {
+                pageNumPending = num;
+            } else {
+                renderPage(num);
+            }
+        }
+
+        function onPrevPageClick() {
+            if (pageNum <= 1) return;
+            if (pageNum > 2) {
+                pageNum -= 2;
+            } else {
+                pageNum = 1;
+            }
+            queueRenderPage(pageNum);
+        }
+
+        function onNextPageClick() {
+            if (pageNum >= totalPages) return;
+            if (pageNum === 1) {
+                pageNum = 2;
+            } else {
+                pageNum += 2;
+            }
+            queueRenderPage(pageNum);
+        }
+
+        document.getElementById('prevPageBtn').addEventListener('click', onPrevPageClick);
+        document.getElementById('nextPageBtn').addEventListener('click', onNextPageClick);
+
+        // 新增：监听键盘事件
+        document.addEventListener('keydown', function(event) {
+            // 当按下左光标键时，触发向前翻页操作
+            if (event.key === 'ArrowLeft') {
+                onPrevPageClick();
+            } 
+            // 当按下右光标键时，触发向后翻页操作
+            else if (event.key === 'ArrowRight') {
+                onNextPageClick();
+            }
+            // 新增：按下“home”键，显示第1页
+            else if (event.key === 'Home') {
+                pageNum = 1;
+                queueRenderPage(pageNum);
+            }
+            // 新增：按下“end”键，显示最后1页
+            else if (event.key === 'End') {
+                pageNum = totalPages;
+                queueRenderPage(pageNum);
+            }
+        });
+
+        // Load the PDF file
+        const url = '徐大头.pdf'; // Replace with your PDF file path
+
+        pdfjsLib.getDocument(url).promise.then(pdf => {
+            pdfDoc = pdf;
+            totalPages = pdfDoc.numPages;
+            renderPage(pageNum);
+        }).catch(err => {
+            console.error(`Error loading PDF: ${err}`);
+        });
+    </script>
+</body>
+</html>
